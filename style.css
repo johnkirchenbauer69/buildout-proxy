@@ -105,3 +105,10 @@ tr:hover {
 .open + .expand-row {
   display: table-row;
 }
+.badge {
+  background: #b00020;
+  color: white;
+  border-radius: 12px;
+  padding: 2px 8px;
+  font-weight: bold;
+}
