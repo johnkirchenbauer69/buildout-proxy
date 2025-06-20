@@ -1,0 +1,107 @@
+:root {
+  --lee-red: #8A1538;
+  --lee-blue: #003057;
+  --bg: #f5f7fa;
+  --white: #ffffff;
+  --text: #1a1a1a;
+  --border: #e0e0e0;
+  --badge-sale: #d84315;
+  --badge-lease: #2e7d32;
+  --badge-both: #1565c0;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  margin: 0;
+  padding: 2rem;
+}
+
+h1 {
+  color: var(--lee-red);
+  margin-bottom: 1.5rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--white);
+  box-shadow: 0 0 12px rgba(0,0,0,0.05);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+thead {
+  background: var(--white);
+  border-bottom: 2px solid var(--border);
+}
+
+th, td {
+  padding: 1rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+tr:hover {
+  background: #f0f0f0;
+  cursor: pointer;
+}
+
+.badge {
+  padding: 0.3rem 0.75rem;
+  border-radius: 50px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: white;
+}
+
+.sale { background: var(--badge-sale); }
+.lease { background: var(--badge-lease); }
+.both { background: var(--badge-both); }
+
+.expand-row {
+  display: none;
+  background: #fafafa;
+}
+
+.property-card {
+  display: flex;
+  gap: 1.5rem;
+  padding: 1rem 2rem;
+}
+
+.property-card img {
+  width: 250px;
+  height: 160px;
+  object-fit: cover;
+  border-radius: 8px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+}
+
+.property-details {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.property-details h3 {
+  margin: 0;
+  color: var(--lee-blue);
+}
+
+.cta {
+  background-color: var(--lee-red);
+  color: white;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  text-decoration: none;
+  font-weight: 600;
+  margin-top: 1rem;
+  display: inline-block;
+  width: fit-content;
+}
+
+.open + .expand-row {
+  display: table-row;
+}
