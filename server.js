@@ -75,9 +75,30 @@ app.get('/api/brokers', async (req, res) => {
   }
 });
 
+// Lease Spaces endpoint with cache
+app.get('/api/lease_spaces', async (req, res) => {
+  const cacheKey = 'lease_spaces';
+  const cached = cache.get(cacheKey);
+
+  if (cached) {
+    return res.json(cached); // Serve cached
+  }
+
+  try {
+    // You might need to adjust the limit for your API!
+    const response = await axios.get('https://buildout.com/api/v1/ad60e63d545c98569763dd4b3bf32816b6f1b755/lease_spaces.json', {
+      params: { limit: 1000 } // Increase if your org has more than 1000 spaces!
+    });
+    cache.set(cacheKey, response.data);
+    res.json(response.data);
+  } catch (error) {
+    console.error("❌ Error fetching lease spaces:", error.message);
+    res.status(500).json({ error: 'Failed to fetch lease spaces', message: error.message });
+  }
+});
+
 // Start server & load cache on boot
 app.listen(PORT, async () => {
   await loadCache(); // <-- Preload listings before serving
   console.log(`✅ Proxy server running on port ${PORT}`);
 });
-
