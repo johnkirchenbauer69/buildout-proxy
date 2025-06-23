@@ -19,29 +19,21 @@ app.get('/api/listings', async (req, res) => {
   }
 
   try {
-    const response = await axios.get('https://buildout.com/api/v1/ad60e63d545c98569763dd4b3bf32816b6f1b755/properties.json');
+    const params = {
+  limit: req.query.limit || 30,
+  offset: req.query.offset || 0
+};
+
+const response = await axios.get(
+  'https://buildout.com/api/v1/ad60e63d545c98569763dd4b3bf32816b6f1b755/properties.json',
+  { params }
+);
+
     cache.set(cacheKey, response.data);
     res.json(response.data);
   } catch (error) {
-    // Robust error logging!
-    if (error.response) {
-      // Buildout responded with an error status code
-      console.error("❌ Buildout API error:", {
-        status: error.response.status,
-        statusText: error.response.statusText,
-        data: error.response.data
-      });
-      res.status(error.response.status).json({
-        error: 'Failed to fetch listings',
-        status: error.response.status,
-        data: error.response.data,
-        message: error.message
-      });
-    } else {
-      // Network or unknown error
-      console.error("❌ Buildout API fetch error (network?):", error.message);
-      res.status(500).json({ error: 'Failed to fetch listings', message: error.message });
-    }
+    console.error("❌ Buildout API fetch error:", error.message);
+    res.status(500).json({ error: 'Failed to fetch listings', message: error.message });
   }
 });
 
@@ -59,23 +51,8 @@ app.get('/api/brokers', async (req, res) => {
     cache.set(cacheKey, response.data);
     res.json(response.data);
   } catch (error) {
-    // Robust error logging!
-    if (error.response) {
-      console.error("❌ Buildout API brokers error:", {
-        status: error.response.status,
-        statusText: error.response.statusText,
-        data: error.response.data
-      });
-      res.status(error.response.status).json({
-        error: 'Failed to fetch brokers',
-        status: error.response.status,
-        data: error.response.data,
-        message: error.message
-      });
-    } else {
-      console.error("❌ Error fetching brokers (network?):", error.message);
-      res.status(500).json({ error: 'Failed to fetch brokers', message: error.message });
-    }
+    console.error("❌ Error fetching brokers:", error.message);
+    res.status(500).json({ error: 'Failed to fetch brokers' });
   }
 });
 
