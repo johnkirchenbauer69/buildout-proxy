@@ -1,6 +1,9 @@
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
+const NodeCache = require('node-cache');    // <-- Add this!
+const cache = new NodeCache({ stdTTL: 86400 }); // <-- And this!
+// This is a simple Express server that fetches and serves real estate listings from Buildout's API.
 
 const app = express();
 const PORT = process.env.PORT || 3000;
