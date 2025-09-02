@@ -8,11 +8,16 @@ const app = express();
 app.set('trust proxy', true); // get correct client IP from x-forwarded-for
 const PORT = process.env.PORT || 3000;
 
+const REFRESH_TOKEN = process.env.REFRESH_TOKEN || '';
+const MIN_REFRESH_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
+let lastRefreshAt = 0; // cooldown tracker
+
+
 // --- Buildout API ---
 const BUILDOUT_BASE =
   'https://buildout.com/api/v1/ad60e63d545c98569763dd4b3bf32816b6f1b755';
 const BUILDOUT_API_URL = `${BUILDOUT_BASE}/properties.json`;
-const PAGE_LIMIT = 1000;
+const PAGE_LIMIT = 200;
 
 // --- Disk cache (prefer persistent disk mount if present) ---
 const DATA_DIR = fs.existsSync('/data') ? '/data' : path.join(__dirname, 'data');
@@ -24,13 +29,20 @@ function ensureDataDir() {
 }
 
 function readCacheFromDisk() {
-  try {
-    const raw = fs.readFileSync(CACHE_FILE, 'utf8');
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed.properties)) return parsed;
-  } catch (_) {}
+  const candidates = [
+    path.join('/data', 'listings.json'),
+    path.join(__dirname, 'data', 'listings.json'),
+  ];
+  for (const p of candidates) {
+    try {
+      if (!fs.existsSync(p)) continue;
+      const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
+      if (Array.isArray(parsed.properties) && parsed.properties.length) return parsed;
+    } catch (_) {}
+  }
   return { properties: [], last_updated: null, count: 0 };
 }
+
 
 function writeCacheToDisk(payload) {
   try {
@@ -52,7 +64,7 @@ async function requestWithRetry(url, { attempts = 6, baseDelay = 800 } = {}) {
     try {
       return await axios.get(url, {
         timeout: 15000,
-        headers: { 'User-Agent': 'lee-associates-buildout-proxy/1.0' }
+        headers: { 'User-Agent': 'lee-associates-buildout-proxy/1.0', 'Accept': 'application/json' }
       });
     } catch (err) {
       lastErr = err;
@@ -179,15 +191,21 @@ app.get('/api/lease_spaces', async (_req, res) => {
 });
 
 // Manual refresh endpoints
-app.post('/api/refresh', async (_req, res) => {
+app.post('/api/refresh', async (req, res) => {
+  const token = req.get('x-refresh-token') || req.query.token;
+  if (!REFRESH_TOKEN || token !== REFRESH_TOKEN) {
+    return res.status(401).json({ ok: false, error: 'unauthorized' });
+  }
+  const now = Date.now();
+  if (now - lastRefreshAt < MIN_REFRESH_INTERVAL_MS) {
+    return res.status(429).json({ ok: false, reason: 'cooldown', next_allowed_in_ms: MIN_REFRESH_INTERVAL_MS - (now - lastRefreshAt) });
+  }
+  lastRefreshAt = now;
   await loadCache();
-  res.json({ refreshed: true, count: listingsCache.length });
+  res.json({ ok: true, count: listingsCache.length });
 });
-app.get('/refresh', async (_req, res) => {
-  console.log('🔁 Refresh triggered via /refresh route');
-  await loadCache();
-  res.json({ refreshed: true, count: listingsCache.length });
-});
+
+app.get('/refresh', (_req, res) => res.status(404).send('Use POST /api/refresh'));
 
 // Health
 app.get('/health', (_req, res) => {
