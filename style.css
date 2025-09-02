@@ -1,0 +1,607 @@
+/* ========== Lee & Associates – Core Theme ========== */
+:root {
+  /* Brand core (from guidelines) */
+  --lee-red:    #98002E;  /* 187C-ish / main brand red */
+  --lee-bright: #CD1442;  /* Bright Red (PMS 200) */
+  --lee-merlot: #4E131E;  /* Merlot (PMS 1817) */
+  --lee-navy:   #003146;  /* Navy (PMS 3035) */
+  --lee-slate:  #7E8083;  /* Slate (PMS 424) */
+  --lee-char:   #303C42;  /* Charcoal (PMS 425) */
+
+  /* UI neutrals */
+  --bg:         #f5f7fa;
+  --white:      #ffffff;
+  --text:       #000000;
+  --muted:      #444;
+  --border:     #e0e0e0;
+
+  /* Pills (Listing Type) */
+  --pill-sale:  #8A941E;  /* Green */
+  --pill-lease: #003146;  /* Navy */
+  --pill-both:  #CD1442;  /* Bright Red */
+
+  /* Controls */
+  --btn-bg:     var(--lee-red);
+  --btn-bg-2:   #d9d9d9;
+  --btn-fg:     #ffffff;
+  --btn-fg-2:   var(--lee-red);
+  --chip-fg:    var(--lee-red);
+  --chip-border: rgba(0,0,0,0.08);
+
+  /* Elevation */
+  --shadow-1:  0 0 12px rgba(0,0,0,0.05);
+  --shadow-2:  0 6px 20px rgba(0,0,0,0.10);
+
+  /* Radii */
+  --r-card:     12px;
+  --r-pill:     999px;
+}
+
+/* Motion safety */
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+
+/* ========== Base ========== */
+body {
+  font-family: "Helvetica Neue", -apple-system, BlinkMacSystemFont, "Segoe UI",
+               Roboto, Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji",
+               "Segoe UI Symbol", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  margin: 0;
+  padding: 2rem;
+}
+
+h1 {
+  color: var(--lee-red);
+  margin: 0 0 1.5rem;
+  letter-spacing: .005em;
+}
+
+/* ========== Table ========== */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--white);
+  box-shadow: var(--shadow-1);
+  border-radius: var(--r-card);
+  overflow: hidden;
+}
+
+thead {
+  background: var(--white);
+  border-bottom: 2px solid var(--border);
+}
+
+th, td {
+  padding: 1rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+tr {
+  transition: background .25s ease;
+}
+tr:hover {
+  background: rgba(0,0,0,0.02);
+  cursor: pointer;
+}
+
+/* ========== Header stack/logo ========== */
+.stacked-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0;
+  gap: 0;
+}
+.site-logo { height: 75px; width: auto; }
+
+/* ========== Expandable row ========== */
+/*
+ * The expandable row relies on a simple show/hide toggle using the
+ * `.open` class. The `display` property is toggled via JavaScript.
+ * Animations are handled via the `.expand-row` definitions located
+ * further down in this stylesheet. These earlier rules were removed
+ * to avoid conflicting transitions.
+ */
+
+/* ========== Property Card ========== */
+.property-card {
+  display: flex;
+  gap: 1.5rem;
+  padding: 1rem 2rem;
+  /* Align items at the top so the highlights card aligns with the photo and text */
+  align-items: flex-start;
+}
+
+.property-card img {
+  width: 250px;
+  height: 160px;
+  object-fit: cover;
+  border-radius: 8px;
+  box-shadow:
+    0 4px 8px rgba(0, 0, 0, 0.12),
+    0 8px 16px rgba(0, 0, 0, 0.12);
+  transition: box-shadow 0.25s ease, transform 0.25s ease;
+}
+
+.property-card img:hover {
+  box-shadow:
+    0 6px 12px rgba(0, 0, 0, 0.18),
+    0 12px 24px rgba(0, 0, 0, 0.18);
+  transform: scale(1.02); /* small zoom effect */
+}
+
+
+
+/*
+ * Layout for the expanded property details.  Use a two-column grid to
+ * position the main content (address, subtype, description, size, CTAs)
+ * alongside the highlights card.  The first column flexes to fill
+ * available space; the second column has a constrained width to allow
+ * the highlights to extend horizontally.  Align items stretch so the
+ * highlights container matches the height of the main content.
+ */
+.property-details {
+  display: grid;
+  grid-template-columns: 1fr minmax(260px, 380px);
+  gap: 1.25rem;
+  align-items: stretch;
+}
+
+/* Main column containing the primary property information.  Use a
+ * vertical stack with consistent spacing.  This class is applied via
+ * JavaScript when building the expanded row.
+ */
+.property-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+/* Highlights column wrapping the key-highlights component.  Stretch
+ * vertically to match the height of the main column.  The width is
+ * controlled by the grid definition above.
+ */
+.property-highlights-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* Ensure the highlights card fills its container and removes default
+ * margins so it sits flush with the grid cell.  This reduces
+ * unnecessary vertical height.
+ */
+.property-highlights-container .key-highlights {
+  height: 100%;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Allow the stats grid to take up remaining vertical space within the
+ * highlights card so the card stretches evenly.  This prevents the
+ * highlights container from being shorter than the content to its
+ * left.
+ */
+.property-highlights-container .key-highlights .stats-grid {
+  flex-grow: 1;
+}
+
+/* On smaller screens, stack the details vertically and allow the
+ * highlights to take full width underneath the main content.  The
+ * columns collapse to a single column grid.
+ */
+@media (max-width: 768px) {
+  .property-details {
+    grid-template-columns: 1fr;
+  }
+}
+
+.property-details h3 {
+  margin: 0;
+  color: var(--lee-merlot); /* fixed: previously var(--mer) */
+  letter-spacing: .01em;
+}
+
+/* ========== Buttons / CTAs ========== */
+.cta {
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  padding: 0.55rem 1rem;
+  border-radius: 8px;
+  text-decoration: none;
+  font-weight: 600;
+  display: inline-block;
+  width: max-content;
+  border: 1px solid rgba(0,0,0,0.04);
+  transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
+}
+
+.cta {
+  margin-right: 0.5rem; /* 8px space between buttons */
+}
+
+.cta:last-child {
+  margin-right: 0; /* no extra space after the last button */
+}
+
+.cta:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.03);
+  box-shadow: var(--shadow-2);
+}
+.cta:active { transform: translateY(0); }
+
+.cta.secondary {
+  background: var(--btn-bg-2);
+  color: var(--btn-fg-2);
+  border: 1px solid var(--btn-fg-2);
+}
+.cta.secondary:hover {
+  background: var(--btn-fg-2);
+  color: #fff;
+}
+
+/* ========== Listing Type Pills ========== */
+.badge {
+  display: inline-block;
+  padding: 0.4rem 0.85rem;
+  border-radius: var(--r-pill);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.015em;
+  color: #fff;
+  transition: transform .2s ease, filter .2s ease;
+}
+.badge:hover {
+  transform: scale(1.05);
+  filter: brightness(1.05);
+}
+/* state colors */
+.badge.sale  { background: var(--pill-sale);  } /* For Sale   */
+.badge.lease { background: var(--pill-lease); } /* For Lease  */
+.badge.both  { background: var(--pill-both);  } /* Sale+Lease */
+
+/* ========== Broker chips ========== */
+.broker-pill {
+  display: inline-block;
+  background: #f3f4f6;
+  color: var(--chip-fg);
+  font-weight: 500;
+  border-radius: 16px;
+  padding: 3px 12px;
+  margin-right: 4px;
+  text-decoration: none;
+  font-size: .96em;
+  border: 1px solid var(--chip-border);
+  transition: background .18s ease, color .18s ease;
+}
+.broker-pill:hover {
+  background: #e7e8ea;
+  color: var(--lee-merlot);
+  text-decoration: underline;
+}
+
+/* Legacy broker link style (kept if used elsewhere) */
+.broker-link {
+  background: #f4f4f4;
+  padding: 3px 8px;
+  margin: 2px;
+  border-radius: 6px;
+  color: var(--lee-red);
+  text-decoration: none;
+  font-weight: 500;
+  font-size: .85em;
+  border: 1px solid #e3e3e3;
+  transition: background .2s ease;
+}
+.broker-link:hover { background: #fce5ea; }
+
+/* ========== Controls ========== */
+.table-controls-flex {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  gap: 12px;
+}
+
+.search-bar {
+  padding: 6px 12px;
+  border: 1px solid #bbb;
+  border-radius: 8px;
+  font-size: 1rem;
+  min-width: 260px;
+}
+
+/* Filter chip buttons */
+.filter-bar {
+  backdrop-filter: blur(12px);
+  background: rgba(255,255,255,0.7);
+  border: 1px solid rgba(255,255,255,0.3);
+  border-radius: 12px;
+  padding: .5rem 1rem;
+}
+
+.filter-btn {
+  background: #fff;
+  border: 1.5px solid var(--lee-red);
+  color: var(--lee-red);
+  padding: 6px 18px;
+  border-radius: var(--r-pill);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .2s, color .2s, transform .15s ease;
+}
+.filter-btn:hover,
+.filter-btn.active {
+  background: var(--lee-red);
+  color: #fff;
+}
+.filter-btn:active { transform: scale(.98); }
+
+.filter-btn:disabled,
+.filter-btn:disabled:hover,
+.filter-btn:disabled.active,
+.filter-btn:disabled:focus {
+  background: #f0f0f0 !important;
+  color: #ccc !important;
+  cursor: not-allowed;
+  border-color: #e5e5e5 !important;
+}
+
+/* ========== “Available” size highlight ========== */
+.property-size strong { color: var(--lee-red); font-weight: 700; margin-right: 4px; }
+.property-size .building-size { color: #000; font-weight: 700; }
+
+.property-size .highlight-pill {
+  background: #F6E6EB;
+  color: var(--lee-red);
+  border-radius: var(--r-pill);
+  display: inline-block;
+  padding: 7px 20px 7px 16px;
+  font-weight: 700;
+  font-size: 1.05em;
+  letter-spacing: .01em;
+  margin-top: 10px;
+  margin-bottom: 6px;
+}
+.property-size .highlight-pill .building-size {
+  color: #666;
+  font-weight: 400;
+  margin-left: .8ch;
+  position: relative;
+}
+
+/* ========== Expand animation (kept) ========== */
+@keyframes fadeIn { from {opacity:0;} to {opacity:1;} }
+.expand-row { display: none; transition: all .3s cubic-bezier(.6,.32,.14,1.46); }
+.expand-row.open { display: table-row; animation: fadeIn 1s; }
+
+/* Lightbox / image modal */
+.image-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: none;                 /* hidden by default */
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.70);
+  backdrop-filter: blur(4px);
+}
+
+/* Show state */
+.image-modal.open { display: flex; }
+
+/* Container to center image and host animation */
+.image-modal__content {
+  position: relative;
+  max-width: min(92vw, 1400px);
+  max-height: 90vh;
+  animation: modalFade 140ms ease-out;
+}
+
+/* The image */
+.image-modal__img {
+  max-width: 100%;
+  max-height: 90vh;
+  border-radius: 12px;
+  box-shadow:
+    0 6px 20px rgba(0,0,0,0.25),
+    0 18px 50px rgba(0,0,0,0.35);
+  transform-origin: center;
+  animation: zoomIn 160ms cubic-bezier(.2,.7,.2,1);
+}
+
+/* Close button */
+.image-modal__close {
+  position: absolute;
+  top: -44px;
+  right: -6px;
+  background: rgba(255,255,255,0.92);
+  color: var(--lee-merlot);
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 999px;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  cursor: pointer;
+  transition: transform .12s ease, background .12s ease;
+}
+.image-modal__close:hover { transform: scale(1.06); background: #fff; }
+
+/* Animations */
+@keyframes zoomIn {
+  from { transform: scale(.96); opacity: 0 }
+  to   { transform: scale(1);   opacity: 1 }
+}
+@keyframes modalFade {
+  from { opacity: 0 }
+  to   { opacity: 1 }
+}
+
+/* Prevent page scroll when modal is open */
+body.modal-open { overflow: hidden; }
+
+/* Make thumbnails feel clickable */
+.property-img {
+  cursor: zoom-in;
+  transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
+  box-shadow:
+    0 1px 2px rgba(0,0,0,0.06),
+    0 6px 24px rgba(0,0,0,0.06);
+}
+.property-img:hover {
+  transform: translateY(-2px);
+  filter: saturate(1.03);
+  box-shadow:
+    0 8px 28px rgba(0,0,0,0.08),
+    0 18px 48px rgba(0,0,0,0.12);
+}
+
+/*
+ * Responsive adjustments: on smaller viewports the property card stacks
+ * vertically and the image fills the available width. This maintains
+ * readability and ensures the layout does not break on mobile devices.
+ */
+@media (max-width: 768px) {
+  .property-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .property-card img {
+    width: 100%;
+    height: auto;
+    margin-bottom: 1rem;
+  }
+  .property-details {
+    width: 100%;
+  }
+}
+/* ===== Key Highlights ===== */
+.key-highlights {
+  margin: 10px 0 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(0,0,0,0.06);
+  border-left: 4px solid var(--lee-red); /* brand accent */
+  border-radius: 10px;
+  background: rgba(255,255,255,0.75);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.04);
+  /* indent the whole block a touch relative to the text content */
+  margin-left: 4px;
+}
+/* Property Highlights Styling */
+.property-highlights {
+  margin-left: 1.5rem; /* Indent from main heading */
+  padding-left: 1rem; /* Extra spacing inside */
+  border-left: 3px solid #ccc; /* Vertical line for visual separation */
+  margin-top: 0.5rem; /* Space from heading */
+  margin-bottom: 0.5rem; /* Space before description */
+}
+
+.property-highlights p {
+  margin: 0.25rem 0; /* Compact spacing between items */
+  font-size: 0.95rem; /* Slightly smaller than heading */
+  color: #333; /* Dark gray text for readability */
+}
+
+.property-highlights i {
+  color: #800020; /* Burgundy icons to match theme */
+  margin-right: 0.5rem; /* Space between icon and text */
+}
+
+/* Optional: subtle background on hover */
+.property-highlights:hover {
+  background-color: rgba(128, 0, 32, 0.05);
+  transition: background-color 0.3s ease;
+}
+
+.key-highlights__header {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .85rem 1rem .35rem 1rem;
+  color: var(--lee-merlot);
+  font-weight: 700;
+  letter-spacing: .01em;
+}
+
+/*
+ * The stats grid will auto-fit as many columns as will comfortably fit,
+ * down to a minimum width. This improves responsiveness without
+ * requiring multiple breakpoints.
+ */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+  padding: 0.5rem 1rem 1rem 1rem;
+}
+
+/*
+ * When used within the key-highlights component, constrain the grid to two columns
+ * on larger screens so that highlights display in a more compact two-by-two layout.
+ * On smaller viewports, the layout collapses to a single column.
+ */
+.key-highlights .stats-grid {
+  grid-template-columns: repeat(2, 1fr);
+}
+@media (max-width: 600px) {
+  .key-highlights .stats-grid {
+    grid-template-columns: repeat(1, 1fr);
+  }
+}
+
+.stat {
+  display: flex;
+  align-items: center;
+  gap: .7rem;
+  padding: .6rem .75rem;
+  border: 1px solid rgba(0,0,0,.06);
+  border-radius: 10px;
+  background: #fafbfc;
+  transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
+}
+.stat:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(0,0,0,.06);
+  background: #fff;
+}
+
+.stat__icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: #F6E6EB;           /* soft brand tint */
+  color: var(--lee-red);
+  flex: 0 0 28px;
+}
+.stat__icon svg { width: 16px; height: 16px; }
+
+.stat__label {
+  font-size: .74rem;
+  color: #555;
+  line-height: 1.1;
+}
+.stat__value {
+  font-size: .98rem;
+  font-weight: 700;
+  color: #1d1d1f;
+  letter-spacing: .01em;
+}
+
+/* Optional separator line under header */
+.key-highlights__rule {
+  height: 1px; background: var(--border);
+  margin: 0 1rem .5rem 1rem;
+  opacity: .6;
+}
