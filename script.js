@@ -218,6 +218,55 @@ function isActiveDealStatus(item) {
   }
   return true;
 }
+
+// ---- Size display helpers ----
+// Compute the size string for the table row. Uses SF or AC depending on property type.
+// If there is available square footage (totalAvailableSF), it takes precedence. For land
+// properties (type id 5) with no available SF, convert the building/lot size from square
+// feet to acres (1 acre = 43,560 SF) and append "AC".
+function getTableSize(listing) {
+  const avail = toNum(listing.totalAvailableSF);
+  const building = toNum(listing.building_size_sf ?? listing.building_size);
+  const isLand = String(listing.property_type_id ?? '') === '5';
+  if (avail > 0) {
+    return `${avail.toLocaleString()} SF`;
+  }
+  if (building > 0) {
+    if (isLand) {
+      const acres = building / 43560;
+      return `${acres.toFixed(2)} AC`;
+    }
+    return `${building.toLocaleString()} SF`;
+  }
+  return '—';
+}
+
+// Compute the HTML string for the property size section in the detail card.
+// Includes both available and building sizes where appropriate. For land
+// properties with no available SF, convert the building size to acres.
+function formatPropertySize(listing) {
+  const avail = toNum(listing.totalAvailableSF);
+  const building = toNum(listing.building_size_sf ?? listing.building_size);
+  const isLand = String(listing.property_type_id ?? '') === '5';
+  if (avail > 0) {
+    if (building > 0) {
+      if (isLand) {
+        const bAcres = building / 43560;
+        return `<strong>Available:</strong> ${avail.toLocaleString()} SF <span class="building-size">of ${bAcres.toFixed(2)} AC</span>`;
+      }
+      return `<strong>Available:</strong> ${avail.toLocaleString()} SF <span class="building-size">of ${building.toLocaleString()} SF</span>`;
+    }
+    return `<strong>Available:</strong> ${avail.toLocaleString()} SF`;
+  }
+  if (building > 0) {
+    if (isLand) {
+      const acres = building / 43560;
+      return `${acres.toFixed(2)} AC`;
+    }
+    return `${building.toLocaleString()} SF`;
+  }
+  return '—';
+}
 // Map between string slugs and your Buildout property_type_id values
 const PROP_TYPE_SLUG_TO_ID = {
   industrial: "3",
@@ -412,24 +461,13 @@ async function loadListings() {
   startProgress();                  // ← start top progress bar
   try {
     // Fetch listings (array), lease spaces (array), and broker response (Response) in parallel
-    const [listings, leaseSpacesRaw, brokerRes] = await Promise.all([
+    const [listings, brokerRes, leaseSpaces] = await Promise.all([
       fetchAllListings(),
-      fetchAllLeaseSpaces(),
       fetchWithTimeout(`${API_BASE}/brokers`).catch(() => null),
+      fetchAllLeaseSpaces(),
     ]);
 
-    // Build spacesByProperty from active lease spaces.
-    const spacesByProperty = {};
-    for (const s of (leaseSpacesRaw || [])) {
-      // Skip any spaces that are not active according to DealStatus.
-      if (!isActiveLeaseSpace(s)) continue;
-      // Determine robust parent ID from the space. Use multiple fallbacks to support different Buildout fields.
-      const pid = s.property_id ?? s.property?.id ?? s.propertyId ?? s.listing_id ?? s.property_listing_id ?? null;
-      if (!pid) continue;
-      (spacesByProperty[pid] ??= []).push(s);
-    }
-
-    // Brokers → map by id
+    // Parse brokers and build a map keyed by broker id
     let brokers = [];
     if (brokerRes && brokerRes.ok) {
       try {
@@ -439,8 +477,20 @@ async function loadListings() {
     }
     const brokerMap = Object.fromEntries((brokers || []).map(b => [b.id, b]));
 
+    // Build spacesByProperty from active lease spaces.
+    const spacesByProperty = {};
+    for (const s of (leaseSpaces || [])) {
+      // Skip any spaces that are not active according to DealStatus.
+      if (!isActiveLeaseSpace(s)) continue;
+      // Determine robust parent ID from the space. Use multiple fallbacks to support different Buildout fields.
+      const pid = s.property_id ?? s.property?.id ?? s.propertyId ?? s.listing_id ?? s.property_listing_id ?? null;
+      if (!pid) continue;
+      (spacesByProperty[pid] ??= []).push(s);
+    }
+
     // Filter listings by deal status so that only active properties are shown
     const activeListings = (listings || []).filter(isActiveDealStatus);
+
     // Enrich listings with broker display, available SF, and debug payload
     listingsGlobal = activeListings.map(listing => {
       const broker1 = brokerMap[listing.broker_id];
@@ -456,7 +506,13 @@ async function loadListings() {
         .map(b => ({ id: b.id, name: `${toText(b.first_name)} ${toText(b.last_name)}`, email: b.email }));
 
       // Determine property id for listing using multiple fallbacks matching the key used when bucketing lease spaces.
-      const listingPid = listing.property_id ?? listing.property?.id ?? listing.propertyId ?? listing.listing_id ?? listing.property_listing_id ?? listing.id;
+      const listingPid =
+        listing.property_id ??
+        listing.property?.id ??
+        listing.propertyId ??
+        listing.listing_id ??
+        listing.property_listing_id ??
+        listing.id;
       const spaces = spacesByProperty[listingPid] || [];
       // Compute space sizes using robust getter; they are already active by filter.
       const spaceSizes = spaces.map(s => getSpaceSize(s));
@@ -484,13 +540,11 @@ async function loadListings() {
 
     // When debugging, expose the raw structures and diagnostics on window
     if (DEBUG) {
-      // Expose diagnostic structures on the window for console inspection.
       window.listingsGlobal = listingsGlobal;
       window.__spacesByProperty = spacesByProperty;
-      window.__allLeaseSpaces = leaseSpacesRaw;
+      window.__allLeaseSpaces = leaseSpaces;
       maybeLogSizeDiagnostics(listingsGlobal, spacesByProperty);
     }
-
 
     // First paint:
     // If you want initial sort/filter to apply, call filterAndSort();
@@ -519,24 +573,19 @@ function renderTable(listingsArr) {
 
   if (!listingsArr.length) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td colspan="4" style="padding:1.25rem; color:#666;">No results. Try adjusting filters or search.</td>`;
+    tr.innerHTML = `<td colspan="5" style="padding:1.25rem; color:#666;">No results. Try adjusting filters or search.</td>`;
     tbody.appendChild(tr);
     return;
   }
 
   listingsArr.forEach(listing => {
+    // Build a full location string for the detail card (street, city, state, zip).  Also
+    // compute the street-only address for the table view.  We strip leading comma in
+    // case address is missing.
     const location = `${listing.address || ""}, ${listing.city || ""}, ${listing.state || ""} ${listing.zip || ""}`.replace(/^,\s*/, '');
-  function pickDisplaySF(listing) {
-    const avail = toNum(listing.totalAvailableSF);
-    const bldg  = toNum(listing.building_size_sf ?? listing.building_size);
-    if (avail > 0) return avail;
-    if (bldg  > 0) return bldg;
-    return null;
-  }
-
-  // ...
-  const _sf = pickDisplaySF(listing);
-  const shownSize = _sf != null ? `${_sf.toLocaleString()} SF` : "—";
+    const street   = listing.address || "";
+  // Determine the size string for the table row (uses SF or AC depending on property type)
+  const shownSize = getTableSize(listing);
 
 
     const type = (listing.lease && listing.sale)
@@ -586,17 +635,11 @@ function renderTable(listingsArr) {
     mainRow.onkeydown = (e) => {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
     };
-    // Build a human-friendly tooltip revealing the raw inputs
-    const sd = listing.sizeDebug || {};
-    const tip = [
-      `Spaces: ${sd.spaceSizes ? sd.spaceSizes.join(', ') : 'n/a'}`,
-      `SumSpaces: ${sd.sumSpace ?? 'n/a'}`,
-      `BuildingSF: ${sd.buildingSF ?? 'n/a'}`
-    ].join(' | ');
-
+    // Build the row cells: property address, city, size, brokers, and listing type.
     mainRow.innerHTML = `
-      <td>${toText(location)}</td>
-      <td title="${toText(tip)}">${toText(shownSize)}</td>
+      <td>${toText(street)}</td>
+      <td>${toText(listing.city || '')}</td>
+      <td>${toText(shownSize)}</td>
       <td>${brokerDisplay}</td>
       <td><span class="badge ${pillClass}">${toText(type)}</span></td>
     `;
@@ -607,10 +650,17 @@ function renderTable(listingsArr) {
     if (videoUrl)    buttonsHtml += `<a href="${videoUrl}" class="cta secondary" target="_blank" rel="noopener noreferrer">View Video</a>`;
 
     // --- Key Highlights: extract key fields from the listing ---
-    const ceilingHeight = listing.ceiling_height_f ?? null;
-    const dockDoors     = listing.dock_high_doors   ?? null;
-    const yearBuilt     = listing.year_built        ?? null;
-    const zoning        = listing.zoning            ?? null;
+    // Only show highlights when the data is present and meaningful.
+    // Treat falsy or non-positive numeric values as missing.  Blank strings will
+    // also be considered missing.
+    const chVal = listing.ceiling_height_f;
+    const ceilingHeight = chVal && toNum(chVal) > 0 ? chVal : null;
+    const ddVal = listing.dock_high_doors;
+    const dockDoors     = ddVal && toNum(ddVal) > 0 ? ddVal : null;
+    const ybVal = listing.year_built;
+    const yearBuilt     = ybVal && toNum(ybVal) > 0 ? ybVal : null;
+    const zoningVal = listing.zoning;
+    const zoning        = zoningVal && String(zoningVal).trim() ? zoningVal : null;
 
     // Generate highlight chips using the statChip helper. Only non-null values will render.
     const highlightChips = [
@@ -638,28 +688,15 @@ function renderTable(listingsArr) {
     // description, size details and action buttons. Wrapping it in
     // `.property-main` allows the CSS grid layout to treat it as the first
     // column.
+    // Precompute the property size HTML using helper. This handles SF vs acres for land.
+    const propSizeHtml = formatPropertySize(listing);
     const propertyMainHtml = `
       <div class="property-main">
         <h3>${location}</h3>
         <div class="property-subtype-type">${subtypeTypeLine}</div>
         <div class="property-description">${description}</div>
         <div class="property-size">
-          ${
-            listing.totalAvailableSF
-              ? `<strong>Available:</strong> ${listing.totalAvailableSF.toLocaleString()} SF${
-                  listing.building_size_sf ? ` <span class="building-size">of ${listing.building_size_sf.toLocaleString()} SF</span>` : ""
-                }`
-              : (listing.building_size_sf ? `${listing.building_size_sf.toLocaleString()} SF` : "—")
-              + (toNum(listing.totalAvailableSF) > 0)
-   ? `<strong>Available:</strong> ${toNum(listing.totalAvailableSF).toLocaleString()} SF${
-       toNum(listing.building_size_sf ?? listing.building_size) > 0
-         ? ` <span class="building-size">of ${toNum(listing.building_size_sf ?? listing.building_size).toLocaleString()} SF</span>`
-         : ""
-     }`
-   : (toNum(listing.building_size_sf ?? listing.building_size) > 0
-       ? `${toNum(listing.building_size_sf ?? listing.building_size).toLocaleString()} SF`
-       : "—")
-          }
+          ${propSizeHtml}
         </div>
         <div class="property-ctas">${buttonsHtml}</div>
       </div>
@@ -673,7 +710,7 @@ function renderTable(listingsArr) {
       : '';
 
     expandRow.innerHTML = `
-      <td colspan="4">
+      <td colspan="5">
         <div class="property-card">
           <img
             src="${image}"
@@ -801,6 +838,10 @@ function filterAndSort() {
           v1 = (a.lease && a.sale) ? "for sale & lease" : a.lease ? "for lease" : "for sale";
           v2 = (b.lease && b.sale) ? "for sale & lease" : b.lease ? "for lease" : "for sale";
           break;
+        case "city":
+          v1 = (a.city || "").toLowerCase();
+          v2 = (b.city || "").toLowerCase();
+          break;
         default:
           v1 = v2 = "";
       }
@@ -811,6 +852,7 @@ function filterAndSort() {
   }
 
   renderTable(arr);
+  updateSortIndicators();
 }
 
 // ---- DOM wiring
@@ -847,6 +889,23 @@ document.addEventListener("DOMContentLoaded", () => {
       this.classList.add("active");
       filterAndSort();
       updateURLFromFilters();
+    });
+  });
+
+  // Initialize sorting on table headers. Clicking a sortable header will cycle
+  // through ascending and descending sorts on that column. When a new column
+  // is clicked, the sort resets to ascending order.
+  document.querySelectorAll('th.sortable').forEach(th => {
+    th.addEventListener('click', function() {
+      const key = this.getAttribute('data-sort');
+      if (!key) return;
+      if (currentSort.key === key) {
+        currentSort.dir = -currentSort.dir; // toggle direction
+      } else {
+        currentSort.key = key;
+        currentSort.dir = 1; // default ascending
+      }
+      filterAndSort();
     });
   });
 
