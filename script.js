@@ -1,10 +1,52 @@
+// script.js
 // ---- Config / constants
 const API_BASE  = 'https://buildout-proxy.onrender.com/api';
 const PAGE_SIZE = 30;
+// top of file (near DEBUG)
+const FORCE_REFRESH = new URLSearchParams(location.search).has('refresh');
+
+// DEBUG: enable by visiting ?debug=1
+const DEBUG = new URLSearchParams(location.search).has('debug');
+
 
 let listingsGlobal = [];   // for access in search/sort
 let currentTypeFilter = "";   // blank = show all types
 let currentSort = { key: null, dir: 1 }
+let currentListingType = ""; // '', 'lease', 'sale', 'both'
+
+// ---- Loading overlay helpers
+function showLoading() {
+  const el = document.getElementById('loading');
+  if (el) el.removeAttribute('hidden');
+}
+function hideLoading() {
+  const el = document.getElementById('loading');
+  if (el) el.setAttribute('hidden', '');
+}
+
+// ---- Top progress bar
+let __progTimer = null;
+function startProgress() {
+  const wrap = document.getElementById('topProgress');
+  const bar = wrap?.querySelector('.top-progress__bar');
+  if (!wrap || !bar) return;
+  wrap.hidden = false;
+  bar.style.width = '0%';
+  let w = 0;
+  __progTimer = setInterval(() => {
+    if (w < 80) w += 8 + Math.random()*6; // creep towards 80%
+    bar.style.width = w + '%';
+  }, 200);
+}
+function finishProgress() {
+  const wrap = document.getElementById('topProgress');
+  const bar = wrap?.querySelector('.top-progress__bar');
+  if (!wrap || !bar) return;
+  bar.style.width = '100%';
+  setTimeout(() => { wrap.hidden = true; bar.style.width = '0%'; }, 250);
+  if (__progTimer) { clearInterval(__progTimer); __progTimer = null; }
+}
+
 
 // ---------- formatters ----------
 const fv = v => (v || v === 0) ? String(v) : 'N/A';       // format-or-N/A
@@ -118,8 +160,107 @@ const propertySubtypes = {
 
 // ---- Helpers
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-const toNum = (v) => Number(v) || 0;
+// minimal guard that still tolerates commas or stray text
+const toNum = v =>
+  typeof v === 'number' ? v : Number(String(v ?? '').replace(/[^\d.-]/g, '')) || 0;
 const toText = (s) => (s ?? '').toString().replace(/</g, "&lt;").replace(/>/g, "&gt;");
+// robust getter for space square footage across orgs/fields
+function getSpaceSize(space) {
+  const candidates = [
+    space?.size_sf,
+    space?.space_size,
+    space?.available_sqft,
+    space?.rentable_sqft,
+    space?.sqft,
+    space?.size, // often "52,044 SF"
+  ];
+  for (const c of candidates) {
+    const n = toNum(c);
+    if (n > 0) return n;
+  }
+  return 0;
+}
+// Map between string slugs and your Buildout property_type_id values
+const PROP_TYPE_SLUG_TO_ID = {
+  industrial: "3",
+  retail:     "2",
+  office:     "1",
+  land:       "5",
+};
+const PROP_TYPE_ID_TO_SLUG = Object.fromEntries(
+  Object.entries(PROP_TYPE_SLUG_TO_ID).map(([k,v]) => [v,k])
+);
+
+function getInitialFiltersFromURL() {
+  const sp = new URLSearchParams(window.location.search);
+
+  // property type: allow numeric (1/2/3/5) or slug (industrial/retail/office/land)
+  let ptype = sp.get("ptype") || "";
+  if (ptype) {
+    const lower = ptype.toLowerCase();
+    if (PROP_TYPE_SLUG_TO_ID[lower]) {
+      ptype = PROP_TYPE_SLUG_TO_ID[lower];
+    } else if (!["1","2","3","5"].includes(ptype)) {
+      ptype = ""; // invalid -> ignore
+    }
+  }
+
+  // listing type: "", "lease", "sale", "both"
+  let lt = (sp.get("lt") || "").toLowerCase();
+  if (!["", "lease", "sale", "both"].includes(lt)) lt = "";
+
+  // search query
+  const q = sp.get("q") || "";
+
+  // Also accept hash like #industrial for legacy links
+  if (!ptype && location.hash) {
+    const h = location.hash.replace("#","").toLowerCase();
+    if (PROP_TYPE_SLUG_TO_ID[h]) ptype = PROP_TYPE_SLUG_TO_ID[h];
+  }
+
+  return { ptype, lt, q };
+}
+
+function setPropertyTypeUI(id) {
+  // set global + activate the right chip
+  currentTypeFilter = id || "";
+  document.querySelectorAll(".filter-btn").forEach(b => {
+    if ((b.getAttribute("data-type") || "") === currentTypeFilter) {
+      b.classList.add("active");
+    } else {
+      b.classList.remove("active");
+    }
+  });
+}
+
+function setListingTypeUI(lt) {
+  currentListingType = lt || "";
+  const sel = document.getElementById("listingTypeSelect");
+  if (sel) sel.value = currentListingType;
+}
+
+function setSearchUI(q) {
+  const inp = document.getElementById("searchInput");
+  if (inp) inp.value = q || "";
+}
+
+// Keep URL in sync with current filters (no reload)
+function updateURLFromFilters() {
+  const sp = new URLSearchParams(window.location.search);
+
+  // property type -> slug for pretty URLs
+  const slug = PROP_TYPE_ID_TO_SLUG[currentTypeFilter] || "";
+  if (slug) sp.set("ptype", slug); else sp.delete("ptype");
+
+  if (currentListingType) sp.set("lt", currentListingType); else sp.delete("lt");
+
+  const q = (document.getElementById("searchInput")?.value || "").trim();
+  if (q) sp.set("q", q); else sp.delete("q");
+
+  const newUrl = `${window.location.pathname}?${sp.toString()}`.replace(/\?$/,"");
+  history.replaceState(null, "", newUrl);
+}
+
 
 function debounce(fn, ms = 200) {
   let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
@@ -180,52 +321,166 @@ async function fetchAllListings() {
   return allListings;
 }
 
-async function loadListings() {
-  const [listings, brokerRes, leaseSpacesRes] = await Promise.all([
-    fetchAllListings(),
-    fetchWithTimeout(`${API_BASE}/brokers`),
-    fetchWithTimeout(`${API_BASE}/lease_spaces`)
-  ]);
+// ---- Data fetch (lease spaces)
+const PAGE_SIZE_SPACES = 200; // gentler than 1000
 
-  // Lease spaces
-  const leaseSpacesData = await leaseSpacesRes.json();
-  const leaseSpaces = leaseSpacesData.lease_spaces || [];
-
-  const spacesByProperty = {};
-  for (const space of leaseSpaces) {
-    if (!spacesByProperty[space.property_id]) spacesByProperty[space.property_id] = [];
-    spacesByProperty[space.property_id].push(space);
+async function fetchAllLeaseSpaces() {
+  const cacheKey = 'buildout:lease_spaces:v2';  // bump to v2 to invalidate old cache
+  const cached = !FORCE_REFRESH && sessionStorage.getItem(cacheKey);
+  if (cached) {
+    try {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed) && parsed.length) return parsed;
+    } catch { /* ignore */ }
   }
 
-  // Brokers mapping
-  const brokersData = await brokerRes.json();
-  const brokers = brokersData.brokers || brokersData;
-  const brokerMap = Object.fromEntries((brokers || []).map(b => [b.id, b]));
+  let all = [];
+  let offset = 0;
+  let totalCount = null;
 
-  // Map listings, sum total available SF
-  listingsGlobal = (listings || []).map(listing => {
-    const broker1 = brokerMap[listing.broker_id];
-    const broker2 = brokerMap[listing.second_broker_id];
+  while (true) {
+    const res = await fetchWithTimeout(`${API_BASE}/lease_spaces?limit=${PAGE_SIZE_SPACES}&offset=${offset}`);
+    if (!res.ok) {
+      console.error('lease_spaces API error:', res.status, await res.text());
+      break;
+    }
+    const data = await res.json();
+    if (totalCount === null) totalCount = data.count ?? null;
 
-    // Build a display string for brokers with sanitized names and mailto links
-    const brokerDisplay = [broker1, broker2]
-      .filter(Boolean)
-      .map(b => `<a href="mailto:${b.email}" class="broker-pill" data-email="${b.email}">${toText(b.first_name)} ${toText(b.last_name)}</a>`)
-      .join(" ");
+    const batch = data.lease_spaces || [];
+    all = all.concat(batch);
+    // after you finish building the "all" array:
+    if (DEBUG) {
+      window.__allLeaseSpaces = all;           // <— expose raw spaces
+    }
+    // If server returns a total, use it; otherwise stop when a short page arrives
+    if (totalCount != null) {
+      if (all.length >= totalCount) break;
+    } else {
+      if (batch.length < PAGE_SIZE_SPACES) break;
+    }
 
-    // Build an array of broker objects for any future programmatic needs
-    const brokersArr = [broker1, broker2]
-      .filter(Boolean)
-      .map(b => ({ id: b.id, name: `${toText(b.first_name)} ${toText(b.last_name)}`, email: b.email }));
+    offset += PAGE_SIZE_SPACES;
+    await sleep(900); // polite pacing
+  }
 
-    // Sum all available lease space square footage for this property
-    const spaces = spacesByProperty[listing.id] || [];
-    const totalAvailableSF = spaces.reduce((sum, s) => sum + toNum(s.size_sf), 0);
+  try { sessionStorage.setItem(cacheKey, JSON.stringify(all)); } catch {}
+  return all;
+}
 
-    return { ...listing, brokerDisplay, brokersArr, totalAvailableSF };
-  });
+// REPLACE your current loadListings() with this version
+async function loadListings() {
+  showLoading();                     // ← show overlay at start
+  startProgress();                  // ← start top progress bar
+  try {
+    // Fetch all three in parallel; tolerate failures for the side calls
+    const [listings, brokerRes, leaseRes] = await Promise.all([
+      fetchAllListings(),
+      fetchAllLeaseSpaces(),                                        // returns Array
+      fetchWithTimeout(`${API_BASE}/brokers`).catch(() => null), // Response | null
+    ]);
 
-  renderTable(listingsGlobal);
+    // Lease spaces → map by property
+    let leaseSpaces = [];
+    if (leaseRes && leaseRes.ok) {
+      try {
+        const leaseSpacesData = await leaseRes.json();
+        leaseSpaces = leaseSpacesData.lease_spaces || [];
+      } catch (_) {}
+    }
+    const spacesByProperty = {};
+    for (const space of leaseSpaces) {
+      (spacesByProperty[space.property_id] ??= []).push(space);
+    }
+
+    // Brokers → map by id
+    let brokers = [];
+    if (brokerRes && brokerRes.ok) {
+      try {
+        const brokersData = await brokerRes.json();
+        brokers = brokersData.brokers || brokersData || [];
+      } catch (_) {}
+    }
+
+// Brokers → map by id (unchanged above)
+const brokerMap = Object.fromEntries((brokers || []).map(b => [b.id, b]));
+
+// Enrich listings and compute totals (+ collect sizeDebug)
+listingsGlobal = (listings || []).map(listing => {
+  const broker1 = brokerMap[listing.broker_id];
+  const broker2 = brokerMap[listing.second_broker_id];
+
+  const brokerDisplay = [broker1, broker2]
+    .filter(Boolean)
+    .map(b => `<a href="mailto:${b.email}" class="broker-pill" data-email="${b.email}">${toText(b.first_name)} ${toText(b.last_name)}</a>`)
+    .join(" ");
+
+  const brokersArr = [broker1, broker2]
+    .filter(Boolean)
+    .map(b => ({ id: b.id, name: `${toText(b.first_name)} ${toText(b.last_name)}`, email: b.email }));
+
+  // <-- NEW: collect space sizes with the robust getter
+      // Derive the appropriate key to match lease spaces with this listing. Many fields may
+      // reference the parent property depending on the Buildout API response shape.
+      const pidListing =
+        listing.property_id ??
+        listing.property?.id ??
+        listing.propertyId ??
+        listing.listing_id ??
+        listing.property_listing_id ??
+        listing.id;
+      const spaces = spacesByProperty[pidListing] || [];
+  const spaceSizes = spaces.map(s => getSpaceSize(s));
+  const totalAvailableSF = spaceSizes.reduce((sum, n) => sum + toNum(n), 0);
+
+  // normalize building SF for later comparison / tooltip
+  const buildingSF = toNum(listing.building_size_sf ?? listing.building_size);
+
+  // stash a debug payload we can surface in tooltips & logs
+  const sizeDebug = {
+    spaceSizes,         // [52044, ...]
+    sumSpace: totalAvailableSF,
+    buildingSF,
+    hadSpaces: spaces.length > 0
+  };
+  // expose for console debugging
+  window.listingsGlobal      = listingsGlobal;
+  window.__spacesByProperty  = spacesByProperty;
+  window.__allLeaseSpaces    = leaseSpaces;
+
+  return {
+    ...listing,
+    brokerDisplay,
+    brokersArr,
+    totalAvailableSF,
+    sizeDebug
+  };
+});
+
+// expose for quick console peeks
+if (DEBUG) {
+  window.__spacesByProperty = spacesByProperty;
+  maybeLogSizeDiagnostics(listingsGlobal, spacesByProperty);
+}
+
+
+    // First paint:
+    // If you want initial sort/filter to apply, call filterAndSort();
+    // otherwise keep your current behavior and render the full set.
+    if (typeof filterAndSort === 'function') {
+      filterAndSort();
+    } else {
+      renderTable(listingsGlobal);
+    }
+  } catch (err) {
+    console.error('loadListings error:', err);
+    listingsGlobal = [];
+    if (typeof filterAndSort === 'function') filterAndSort();
+    else renderTable([]);
+  } finally {
+    hideLoading();                   // ← always hide overlay
+    finishProgress();                // ← finish top progress bar
+  }
 }
 
 // ---- Rendering
@@ -243,7 +498,18 @@ function renderTable(listingsArr) {
 
   listingsArr.forEach(listing => {
     const location = `${listing.address || ""}, ${listing.city || ""}, ${listing.state || ""} ${listing.zip || ""}`.replace(/^,\s*/, '');
-    const shownSize = (listing.totalAvailableSF ?? listing.building_size_sf) ? `${(listing.totalAvailableSF ?? listing.building_size_sf).toLocaleString()} SF` : "—";
+  function pickDisplaySF(listing) {
+    const avail = toNum(listing.totalAvailableSF);
+    const bldg  = toNum(listing.building_size_sf ?? listing.building_size);
+    if (avail > 0) return avail;
+    if (bldg  > 0) return bldg;
+    return null;
+  }
+
+  // ...
+  const _sf = pickDisplaySF(listing);
+  const shownSize = _sf != null ? `${_sf.toLocaleString()} SF` : "—";
+
 
     const type = (listing.lease && listing.sale)
       ? "For Sale & Lease"
@@ -292,10 +558,17 @@ function renderTable(listingsArr) {
     mainRow.onkeydown = (e) => {
       if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
     };
+    // Build a human-friendly tooltip revealing the raw inputs
+    const sd = listing.sizeDebug || {};
+    const tip = [
+      `Spaces: ${sd.spaceSizes ? sd.spaceSizes.join(', ') : 'n/a'}`,
+      `SumSpaces: ${sd.sumSpace ?? 'n/a'}`,
+      `BuildingSF: ${sd.buildingSF ?? 'n/a'}`
+    ].join(' | ');
 
     mainRow.innerHTML = `
       <td>${toText(location)}</td>
-      <td>${toText(shownSize)}</td>
+      <td title="${toText(tip)}">${toText(shownSize)}</td>
       <td>${brokerDisplay}</td>
       <td><span class="badge ${pillClass}">${toText(type)}</span></td>
     `;
@@ -349,6 +622,15 @@ function renderTable(listingsArr) {
                   listing.building_size_sf ? ` <span class="building-size">of ${listing.building_size_sf.toLocaleString()} SF</span>` : ""
                 }`
               : (listing.building_size_sf ? `${listing.building_size_sf.toLocaleString()} SF` : "—")
+              + (toNum(listing.totalAvailableSF) > 0)
+   ? `<strong>Available:</strong> ${toNum(listing.totalAvailableSF).toLocaleString()} SF${
+       toNum(listing.building_size_sf ?? listing.building_size) > 0
+         ? ` <span class="building-size">of ${toNum(listing.building_size_sf ?? listing.building_size).toLocaleString()} SF</span>`
+         : ""
+     }`
+   : (toNum(listing.building_size_sf ?? listing.building_size) > 0
+       ? `${toNum(listing.building_size_sf ?? listing.building_size).toLocaleString()} SF`
+       : "—")
           }
         </div>
         <div class="property-ctas">${buttonsHtml}</div>
@@ -399,6 +681,43 @@ function updateSortIndicators() {
   });
 }
 
+function maybeLogSizeDiagnostics(listings, spacesByProperty) {
+  if (!DEBUG) return;
+
+  try {
+    const rows = listings.map(l => {
+      const sd = l.sizeDebug || {};
+      return {
+        id: l.id,
+        addr: `${l.address || ''}, ${l.city || ''}`,
+        type: l.property_type_id,
+        lease: !!l.lease, sale: !!l.sale,
+        spaces: (spacesByProperty[l.id] || []).length,
+        spaceSizes: sd.spaceSizes || [],
+        sumSpace: sd.sumSpace || 0,
+        buildingSF: sd.buildingSF || 0
+      };
+    });
+
+    // log the global picture
+    console.log(`🔎 Size diagnostics for ${rows.length} listings`);
+    console.table(rows.slice(0, 30)); // first 30 as a preview
+
+    // highlight suspicious cases
+    const suspicious = rows.filter(r =>
+      (r.sumSpace === 0 && r.spaces > 0) ||        // have spaces, but sum is 0
+      (r.sumSpace === 0 && r.buildingSF === 0)     // both zero
+    );
+    if (suspicious.length) {
+      console.warn('⚠️ Suspicious size rows:', suspicious);
+    } else {
+      console.log('✅ No suspicious size rows detected');
+    }
+  } catch (e) {
+    console.warn('size diagnostics failed', e);
+  }
+}
+
 function filterAndSort() {
   const q = (document.getElementById("searchInput")?.value || "").toLowerCase();
   let arr = listingsGlobal;
@@ -407,6 +726,18 @@ function filterAndSort() {
   if (currentTypeFilter) {
     arr = arr.filter(l => String(l.property_type_id) === currentTypeFilter);
   }
+  if (currentListingType) {
+  arr = arr.filter(l => {
+    const lease = !!l.lease;
+    const sale  = !!l.sale;
+
+    // exact-match behavior:
+    if (currentListingType === 'lease') return lease && !sale;
+    if (currentListingType === 'sale')  return sale  && !lease;
+    if (currentListingType === 'both')  return lease && sale;
+    return true;
+  });
+}
 
   // Search filter
   if (q) {
@@ -456,37 +787,42 @@ function filterAndSort() {
 
 // ---- DOM wiring
 document.addEventListener("DOMContentLoaded", () => {
+  // 1) Apply initial filters from URL BEFORE first render
+  const initial = getInitialFiltersFromURL();
+  if (initial.ptype) setPropertyTypeUI(initial.ptype);
+  if (initial.lt !== undefined) setListingTypeUI(initial.lt);
+  if (initial.q) setSearchUI(initial.q);
+
+  // 2) Wire inputs/filters
   const searchInput = document.getElementById("searchInput");
   if (searchInput) {
-    searchInput.addEventListener("input", debounce(filterAndSort, 180));
+    searchInput.addEventListener("input", debounce(() => {
+      filterAndSort();
+      updateURLFromFilters();
+    }, 180));
+    searchInput.addEventListener("focus", () => searchInput.select());
   }
 
-  // Sorting click events
-  document.querySelectorAll('th.sortable').forEach(th => {
-    th.addEventListener("click", function () {
-      const key = this.getAttribute("data-sort");
-      if (currentSort.key === key) {
-        currentSort.dir *= -1;
-      } else {
-        currentSort.key = key;
-        currentSort.dir = 1;
-      }
+  const typeSel = document.getElementById("listingTypeSelect");
+  if (typeSel) {
+    typeSel.addEventListener("change", () => {
+      currentListingType = typeSel.value || "";
       filterAndSort();
-      updateSortIndicators();
+      updateURLFromFilters();
     });
-  });
+  }
 
-  // Filter buttons
   document.querySelectorAll(".filter-btn").forEach(btn => {
-    btn.addEventListener("click", function() {
+    btn.addEventListener("click", function () {
       currentTypeFilter = this.getAttribute("data-type") || "";
       document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
       this.classList.add("active");
       filterAndSort();
+      updateURLFromFilters();
     });
   });
 
-  // Initial load
+  // 3) Initial load
   loadListings();
 });
 
@@ -533,7 +869,3 @@ document.addEventListener("DOMContentLoaded", () => {
   modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modal.classList.contains('open')) close(); });
 })();
-
-// --- SORT INDICATORS (OPTIONAL) ---
-// A single implementation of `updateSortIndicators` exists earlier in this file.
-// The duplicate definition here has been removed to avoid overriding the original.
