@@ -180,6 +180,44 @@ function getSpaceSize(space) {
   }
   return 0;
 }
+
+// Determine if a lease space is considered active.
+// According to Buildout's DealStatus codes, 0=Inactive, 1=Active, 2=Under Contract, 3=Closed.
+// Many Buildout objects expose this status under different fields (deal_status, deal_status_id, dealStatus).
+// We treat a space as active only when its status value is the numeric 1 or the string 'active'.
+function isActiveLeaseSpace(space) {
+  if (!space) return false;
+  // Check several potential status fields.  Coerce to string for comparison or to number when numeric.
+  const raw = space.deal_status ?? space.deal_status_id ?? space.dealStatus ?? space.dealStatusId ?? null;
+  if (raw != null) {
+    // Numeric codes: handle strings or numbers.
+    const num = Number(raw);
+    if (!Number.isNaN(num)) {
+      return num === 1;
+    }
+    // String codes: case-insensitive compare
+    const s = String(raw).toLowerCase();
+    return s === 'active';
+  }
+  // If status is missing entirely, default to true so that older data without status is included.
+  return true;
+}
+
+// Determine if a property or listing is considered active based on DealStatus.
+// Accepts any object that may have deal status fields similar to lease spaces.
+function isActiveDealStatus(item) {
+  if (!item) return false;
+  const raw = item.deal_status ?? item.deal_status_id ?? item.dealStatus ?? item.dealStatusId ?? null;
+  if (raw != null) {
+    const num = Number(raw);
+    if (!Number.isNaN(num)) {
+      return num === 1;
+    }
+    const s = String(raw).toLowerCase();
+    return s === 'active';
+  }
+  return true;
+}
 // Map between string slugs and your Buildout property_type_id values
 const PROP_TYPE_SLUG_TO_ID = {
   industrial: "3",
@@ -373,24 +411,22 @@ async function loadListings() {
   showLoading();                     // ← show overlay at start
   startProgress();                  // ← start top progress bar
   try {
-    // Fetch all three in parallel; tolerate failures for the side calls
-    const [listings, brokerRes, leaseRes] = await Promise.all([
+    // Fetch listings (array), lease spaces (array), and broker response (Response) in parallel
+    const [listings, leaseSpacesRaw, brokerRes] = await Promise.all([
       fetchAllListings(),
-      fetchAllLeaseSpaces(),                                        // returns Array
-      fetchWithTimeout(`${API_BASE}/brokers`).catch(() => null), // Response | null
+      fetchAllLeaseSpaces(),
+      fetchWithTimeout(`${API_BASE}/brokers`).catch(() => null),
     ]);
 
-    // Lease spaces → map by property
-    let leaseSpaces = [];
-    if (leaseRes && leaseRes.ok) {
-      try {
-        const leaseSpacesData = await leaseRes.json();
-        leaseSpaces = leaseSpacesData.lease_spaces || [];
-      } catch (_) {}
-    }
+    // Build spacesByProperty from active lease spaces.
     const spacesByProperty = {};
-    for (const space of leaseSpaces) {
-      (spacesByProperty[space.property_id] ??= []).push(space);
+    for (const s of (leaseSpacesRaw || [])) {
+      // Skip any spaces that are not active according to DealStatus.
+      if (!isActiveLeaseSpace(s)) continue;
+      // Determine robust parent ID from the space. Use multiple fallbacks to support different Buildout fields.
+      const pid = s.property_id ?? s.property?.id ?? s.propertyId ?? s.listing_id ?? s.property_listing_id ?? null;
+      if (!pid) continue;
+      (spacesByProperty[pid] ??= []).push(s);
     }
 
     // Brokers → map by id
@@ -401,67 +437,59 @@ async function loadListings() {
         brokers = brokersData.brokers || brokersData || [];
       } catch (_) {}
     }
+    const brokerMap = Object.fromEntries((brokers || []).map(b => [b.id, b]));
 
-// Brokers → map by id (unchanged above)
-const brokerMap = Object.fromEntries((brokers || []).map(b => [b.id, b]));
+    // Filter listings by deal status so that only active properties are shown
+    const activeListings = (listings || []).filter(isActiveDealStatus);
+    // Enrich listings with broker display, available SF, and debug payload
+    listingsGlobal = activeListings.map(listing => {
+      const broker1 = brokerMap[listing.broker_id];
+      const broker2 = brokerMap[listing.second_broker_id];
 
-// Enrich listings and compute totals (+ collect sizeDebug)
-listingsGlobal = (listings || []).map(listing => {
-  const broker1 = brokerMap[listing.broker_id];
-  const broker2 = brokerMap[listing.second_broker_id];
+      const brokerDisplay = [broker1, broker2]
+        .filter(Boolean)
+        .map(b => `<a href="mailto:${b.email}" class="broker-pill" data-email="${b.email}">${toText(b.first_name)} ${toText(b.last_name)}</a>`)
+        .join(" ");
 
-  const brokerDisplay = [broker1, broker2]
-    .filter(Boolean)
-    .map(b => `<a href="mailto:${b.email}" class="broker-pill" data-email="${b.email}">${toText(b.first_name)} ${toText(b.last_name)}</a>`)
-    .join(" ");
+      const brokersArr = [broker1, broker2]
+        .filter(Boolean)
+        .map(b => ({ id: b.id, name: `${toText(b.first_name)} ${toText(b.last_name)}`, email: b.email }));
 
-  const brokersArr = [broker1, broker2]
-    .filter(Boolean)
-    .map(b => ({ id: b.id, name: `${toText(b.first_name)} ${toText(b.last_name)}`, email: b.email }));
+      // Determine property id for listing using multiple fallbacks matching the key used when bucketing lease spaces.
+      const listingPid = listing.property_id ?? listing.property?.id ?? listing.propertyId ?? listing.listing_id ?? listing.property_listing_id ?? listing.id;
+      const spaces = spacesByProperty[listingPid] || [];
+      // Compute space sizes using robust getter; they are already active by filter.
+      const spaceSizes = spaces.map(s => getSpaceSize(s));
+      const totalAvailableSF = spaceSizes.reduce((sum, n) => sum + (Number.isFinite(n) ? n : 0), 0);
 
-  // <-- NEW: collect space sizes with the robust getter
-      // Derive the appropriate key to match lease spaces with this listing. Many fields may
-      // reference the parent property depending on the Buildout API response shape.
-      const pidListing =
-        listing.property_id ??
-        listing.property?.id ??
-        listing.propertyId ??
-        listing.listing_id ??
-        listing.property_listing_id ??
-        listing.id;
-      const spaces = spacesByProperty[pidListing] || [];
-  const spaceSizes = spaces.map(s => getSpaceSize(s));
-  const totalAvailableSF = spaceSizes.reduce((sum, n) => sum + toNum(n), 0);
+      // Normalize building SF for later comparison / tooltip
+      const buildingSF = toNum(listing.building_size_sf ?? listing.building_size);
 
-  // normalize building SF for later comparison / tooltip
-  const buildingSF = toNum(listing.building_size_sf ?? listing.building_size);
+      // Stash debug payload we can surface in tooltips & logs
+      const sizeDebug = {
+        spaceSizes,
+        sumSpace: totalAvailableSF,
+        buildingSF,
+        hadSpaces: spaces.length > 0,
+      };
 
-  // stash a debug payload we can surface in tooltips & logs
-  const sizeDebug = {
-    spaceSizes,         // [52044, ...]
-    sumSpace: totalAvailableSF,
-    buildingSF,
-    hadSpaces: spaces.length > 0
-  };
-  // expose for console debugging
-  window.listingsGlobal      = listingsGlobal;
-  window.__spacesByProperty  = spacesByProperty;
-  window.__allLeaseSpaces    = leaseSpaces;
+      return {
+        ...listing,
+        brokerDisplay,
+        brokersArr,
+        totalAvailableSF,
+        sizeDebug,
+      };
+    });
 
-  return {
-    ...listing,
-    brokerDisplay,
-    brokersArr,
-    totalAvailableSF,
-    sizeDebug
-  };
-});
-
-// expose for quick console peeks
-if (DEBUG) {
-  window.__spacesByProperty = spacesByProperty;
-  maybeLogSizeDiagnostics(listingsGlobal, spacesByProperty);
-}
+    // When debugging, expose the raw structures and diagnostics on window
+    if (DEBUG) {
+      // Expose diagnostic structures on the window for console inspection.
+      window.listingsGlobal = listingsGlobal;
+      window.__spacesByProperty = spacesByProperty;
+      window.__allLeaseSpaces = leaseSpacesRaw;
+      maybeLogSizeDiagnostics(listingsGlobal, spacesByProperty);
+    }
 
 
     // First paint:
