@@ -1,3 +1,4 @@
+/* style.css */
 /* ========== Lee & Associates – Core Theme ========== */
 :root {
   /* Brand core (from guidelines) */
@@ -81,11 +82,20 @@ th, td {
 }
 
 tr {
-  transition: background .25s ease;
+  /* Speed up row hover feedback to make highlight feel snappy. */
+  transition: background 0.1s ease;
 }
 tr:hover {
   background: rgba(0,0,0,0.02);
   cursor: pointer;
+}
+
+/* Interactive highlight for listing rows
+ * Increase the hover background subtly for the primary rows.
+ * This uses a slightly stronger shade than the default table hover to improve affordance.
+ */
+.main-row:hover {
+  background: rgba(0, 0, 0, 0.04);
 }
 
 /* ========== Header stack/logo ========== */
@@ -605,3 +615,79 @@ body.modal-open { overflow: hidden; }
   margin: 0 1rem .5rem 1rem;
   opacity: .6;
 }
+.select-wrap {
+  display: inline-block;
+  margin-left: .5rem;
+}
+
+.select-control {
+  appearance: none;
+  background: #fff;
+  border: 1.5px solid var(--lee-red);
+  color: var(--lee-red);
+  padding: 6px 38px 6px 14px;
+  border-radius: var(--r-pill);
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1.2;
+  transition: background .2s, color .2s, transform .15s ease;
+  position: relative;
+
+  /* caret */
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--lee-red) 50%),
+    linear-gradient(135deg, var(--lee-red) 50%, transparent 50%);
+  background-position: calc(100% - 18px) 52%, calc(100% - 12px) 52%;
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+}
+
+.select-control:hover,
+.select-control:focus {
+  background-color: var(--lee-red);
+  color: #fff;
+  outline: none;
+}
+
+@media (max-width: 640px) {
+  .select-control { width: 100%; }
+}
+/* Loading overlay */
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+.loading-overlay[hidden] { display: none; }
+
+.loading-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #fff;
+  border-radius: 16px;
+  padding: 18px 22px;
+  box-shadow: 0 12px 30px rgba(0,0,0,.08);
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  color: #1f2937; /* neutral-800 */
+}
+
+.spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid #e5e7eb;       /* neutral-200 track */
+  border-top-color: #b10036;       /* brand accent */
+  animation: spin 900ms linear infinite;
+}
+
+.loading-text { font-weight: 600; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.top-progress { position: fixed; top: 0; left: 0; right: 0; height: 3px; background: transparent; z-index: 10000; pointer-events: none; }
+.top-progress__bar { height: 100%; width: 0; background: #b10036; transition: width .2s ease; }
