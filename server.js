@@ -1,3 +1,4 @@
+// server.js
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
@@ -183,8 +184,24 @@ app.get('/api/brokers', async (_req, res) => {
 
 app.get('/api/lease_spaces', async (_req, res) => {
   try {
-    const resp = await requestWithRetry(`${BUILDOUT_BASE}/lease_spaces.json?limit=1000`);
-    res.json(resp.data);
+    // Buildout paginates lease spaces; fetch all pages to ensure full coverage
+    const pageLimit = 1000;
+    let allSpaces = [];
+    let offset = 0;
+    let totalCount = null;
+    while (true) {
+      const url = `${BUILDOUT_BASE}/lease_spaces.json?limit=${pageLimit}&offset=${offset}`;
+      const resp = await requestWithRetry(url);
+      const data = resp.data || {};
+      // The API returns an array of lease_spaces and a count
+      const batch = data.lease_spaces || [];
+      if (totalCount === null && typeof data.count === 'number') totalCount = data.count;
+      allSpaces = allSpaces.concat(batch);
+      if (batch.length < pageLimit) break;
+      offset += pageLimit;
+    }
+    // Compose a response similar to Buildout's: include message and count
+    res.json({ message: 'OK', count: totalCount ?? allSpaces.length, lease_spaces: allSpaces });
   } catch (e) {
     res.status(500).json({ error: 'Failed to fetch lease spaces' });
   }
