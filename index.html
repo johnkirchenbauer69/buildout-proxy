@@ -1,3 +1,4 @@
+<!-- index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -11,6 +12,17 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+<!-- Top progress bar -->
+<div id="topProgress" class="top-progress" hidden>
+  <div class="top-progress__bar"></div>
+</div>
+<!-- Loading overlay -->
+<div id="loading" class="loading-overlay" aria-live="polite" aria-busy="true" hidden>
+  <div class="loading-card">
+    <div class="spinner" role="progressbar" aria-label="Loading listings"></div>
+    <p class="loading-text">Loading listings…</p>
+  </div>
+</div>
   <!-- ===== SVG SPRITE: place once, anywhere in the page ===== -->
   <svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
     <defs>
@@ -49,21 +61,33 @@
   </div>
 
   <!-- Filter buttons should live OUTSIDE the table -->
-  <div class="filter-buttons" style="display:flex;justify-content:flex-end;margin-bottom:12px;gap:10px;">
-    <button class="filter-btn" data-type="">All</button>
-    <button class="filter-btn" data-type="3">Industrial</button>
-    <button class="filter-btn" data-type="2">Retail</button>
-    <button class="filter-btn" data-type="1">Office</button>
-    <button class="filter-btn" data-type="5">Land</button>
-  </div>
+<div class="filter-buttons" style="display:flex;justify-content:flex-end;margin-bottom:12px;gap:10px;flex-wrap:wrap;align-items:center;">
+  <button class="filter-btn" data-type="">All</button>
+  <button class="filter-btn" data-type="3">Industrial</button>
+  <button class="filter-btn" data-type="2">Retail</button>
+  <button class="filter-btn" data-type="1">Office</button>
+  <button class="filter-btn" data-type="5">Land</button>
 
-  <table>
+  <!-- Listing Type dropdown -->
+  <label class="select-wrap" aria-label="Listing Type">
+    <select id="listingTypeSelect" class="select-control">
+      <option value="">All Listing Types</option>
+      <option value="lease">For Lease</option>
+      <option value="sale">For Sale</option>
+      <option value="both">For Sale & Lease</option>
+    </select>
+  </label>
+</div>
+
+
+  <table class="listing-table table-header-lee-red">
     <thead>
       <tr>
-        <th class="sortable" data-sort="location">Property</th>
-        <th class="sortable" data-sort="size">Size</th>
-        <th class="sortable" data-sort="brokers">Brokers</th>
-        <th class="sortable" data-sort="type">Type</th>
+        <th class="sortable" data-sort="location">Property <span class="sort-caret" aria-hidden="true"></span></th>
+        <th class="sortable" data-sort="city">City <span class="sort-caret" aria-hidden="true"></span></th>
+        <th class="sortable" data-sort="size">Size <span class="sort-caret" aria-hidden="true"></span></th>
+        <th class="sortable" data-sort="brokers">Brokers <span class="sort-caret" aria-hidden="true"></span></th>
+        <th class="sortable" data-sort="type">Type <span class="sort-caret" aria-hidden="true"></span></th>        
       </tr>
     </thead>
     <tbody id="listing-body"></tbody>
