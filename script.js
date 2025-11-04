@@ -546,6 +546,7 @@ async function loadListings() {
       maybeLogSizeDiagnostics(listingsGlobal, spacesByProperty);
     }
 
+
     // First paint:
     // If you want initial sort/filter to apply, call filterAndSort();
     // otherwise keep your current behavior and render the full set.
@@ -740,11 +741,15 @@ function renderTable(listingsArr) {
 function updateSortIndicators() {
   document.querySelectorAll('th.sortable').forEach(th => {
     th.classList.remove("asc", "desc");
+    th.setAttribute("aria-sort", "none"); // add this
     if (currentSort.key && th.getAttribute("data-sort") === currentSort.key) {
-      th.classList.add(currentSort.dir === 1 ? "asc" : "desc");
+      const isAsc = currentSort.dir === 1;
+      th.classList.add(isAsc ? "asc" : "desc");
+      th.setAttribute("aria-sort", isAsc ? "ascending" : "descending"); // and this
     }
   });
 }
+
 
 function maybeLogSizeDiagnostics(listings, spacesByProperty) {
   if (!DEBUG) return;
@@ -783,6 +788,13 @@ function maybeLogSizeDiagnostics(listings, spacesByProperty) {
   }
 }
 
+// Use whatever the table is displaying for Size.
+// Extract the number; also report if it's AC to break ties nicely.
+function sizeDisplaySortKey(listing) {
+  const s = getTableSize(listing) || '';    // e.g., "114,785 SF", "131.70 AC", "—"
+  return { n: toNum(s), isAC: /ac\b/i.test(s) };
+}
+
 function filterAndSort() {
   const q = (document.getElementById("searchInput")?.value || "").toLowerCase();
   let arr = listingsGlobal;
@@ -792,17 +804,17 @@ function filterAndSort() {
     arr = arr.filter(l => String(l.property_type_id) === currentTypeFilter);
   }
   if (currentListingType) {
-  arr = arr.filter(l => {
-    const lease = !!l.lease;
-    const sale  = !!l.sale;
+    arr = arr.filter(l => {
+      const lease = !!l.lease;
+      const sale  = !!l.sale;
 
-    // exact-match behavior:
-    if (currentListingType === 'lease') return lease && !sale;
-    if (currentListingType === 'sale')  return sale  && !lease;
-    if (currentListingType === 'both')  return lease && sale;
-    return true;
-  });
-}
+      // exact-match behavior:
+      if (currentListingType === 'lease') return lease && !sale;
+      if (currentListingType === 'sale')  return sale  && !lease;
+      if (currentListingType === 'both')  return lease && sale;
+      return true;
+    });
+  }
 
   // Search filter
   if (q) {
@@ -826,27 +838,44 @@ function filterAndSort() {
           v1 = `${a.address || ""} ${a.city || ""} ${a.state || ""} ${a.zip || ""}`.toLowerCase();
           v2 = `${b.address || ""} ${b.city || ""} ${b.state || ""} ${b.zip || ""}`.toLowerCase();
           break;
-        case "size":
-          v1 = (a.totalAvailableSF ?? a.building_size_sf ?? 0);
-          v2 = (b.totalAvailableSF ?? b.building_size_sf ?? 0);
-          break;
+
+        case "size": {
+          const ak = sizeDisplaySortKey(a);
+          const bk = sizeDisplaySortKey(b);
+
+          if (ak.n < bk.n) return -1 * currentSort.dir;
+          if (ak.n > bk.n) return  1 * currentSort.dir;
+
+          // Tie-breaker: when numbers are equal, prefer SF over AC on DESC,
+          // and AC over SF on ASC (keeps behavior intuitive).
+          if (ak.isAC !== bk.isAC) {
+            return (currentSort.dir === -1)
+              ? (ak.isAC ? 1 : -1)   // DESC: SF before AC
+              : (ak.isAC ? -1 : 1);  // ASC: AC before SF
+          }
+          return 0;
+        }
+
         case "brokers":
           v1 = (a.brokerDisplay || "").toLowerCase();
           v2 = (b.brokerDisplay || "").toLowerCase();
           break;
+
         case "type":
           v1 = (a.lease && a.sale) ? "for sale & lease" : a.lease ? "for lease" : "for sale";
           v2 = (b.lease && b.sale) ? "for sale & lease" : b.lease ? "for lease" : "for sale";
           break;
+
         case "city":
           v1 = (a.city || "").toLowerCase();
           v2 = (b.city || "").toLowerCase();
           break;
+
         default:
           v1 = v2 = "";
       }
       if (v1 < v2) return -1 * currentSort.dir;
-      if (v1 > v2) return 1 * currentSort.dir;
+      if (v1 > v2) return  1 * currentSort.dir;
       return 0;
     });
   }
