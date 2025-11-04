@@ -691,3 +691,195 @@ body.modal-open { overflow: hidden; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .top-progress { position: fixed; top: 0; left: 0; right: 0; height: 3px; background: transparent; z-index: 10000; pointer-events: none; }
 .top-progress__bar { height: 100%; width: 0; background: #b10036; transition: width .2s ease; }
+
+/* ===== Sortable header indicators ===== */
+th.sortable::before,
+th.sortable::after {
+  content: none !important;
+}
+
+th.sortable {
+  padding-right: 0 !important;
+}
+
+/* Inline double-caret right next to the label */
+.sort-caret {
+  display: inline-block;
+  position: relative;
+  width: 8px;
+  /* just wide enough for triangles */
+  height: 12px;
+  margin-left: .25rem;
+  /* distance from the text */
+  vertical-align: middle;
+}
+
+.sort-caret::before,
+.sort-caret::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  opacity: .45;
+  transition: opacity .15s ease, border-color .15s ease;
+}
+
+.sort-caret::before {
+  top: 0;
+  border-bottom: 5px solid var(--muted);
+}
+
+.sort-caret::after {
+  bottom: 0;
+  border-top: 5px solid var(--muted);
+}
+
+/* Active sort direction in brand red (JS already toggles .asc/.desc) */
+th.sortable.asc .sort-caret::before {
+  border-bottom-color: var(--lee-red);
+  opacity: 1;
+}
+
+th.sortable.asc .sort-caret::after {
+  opacity: .20;
+}
+
+th.sortable.desc .sort-caret::after {
+  border-top-color: var(--lee-red);
+  opacity: 1;
+}
+
+th.sortable.desc .sort-caret::before {
+  opacity: .20;
+}
+
+/* ===== Header theming ===== */
+.table-header-lee-red thead th {
+  background: var(--lee-red);
+  /* Lee & Associates red */
+  color: #fff;
+}
+
+.table-header-merlot thead th {
+  background: var(--merlot, #741c2a);
+  /* fallback hex if --merlot isn't defined */
+  color: #fff;
+}
+
+/* Make the divider subtle on dark headers */
+.table-header-lee-red thead th,
+.table-header-merlot thead th {
+  border-color: rgba(255, 255, 255, .15);
+}
+
+/* Ensure the inline caret stays visible on dark background */
+.table-header-lee-red thead th.sortable .sort-caret::before,
+.table-header-merlot thead th.sortable .sort-caret::before {
+  border-bottom-color: rgba(255, 255, 255, .7);
+  opacity: 1;
+}
+
+.table-header-lee-red thead th.sortable .sort-caret::after,
+.table-header-merlot thead th.sortable .sort-caret::after {
+  border-top-color: rgba(255, 255, 255, .7);
+  opacity: 1;
+}
+
+.table-header-lee-red thead th.sortable.asc .sort-caret::before,
+.table-header-merlot thead th.sortable.asc .sort-caret::before {
+  border-bottom-color: #fff;
+}
+
+.table-header-lee-red thead th.sortable.desc .sort-caret::after,
+.table-header-merlot thead th.sortable.desc .sort-caret::after {
+  border-top-color: #fff;
+}
+
+/* CLEAN WHITE */
+.table-head--white thead th {
+  background:#fff;
+  color:#1a1a1a;
+  box-shadow: 0 1px 0 rgba(0,0,0,.06), 0 2px 10px rgba(0,0,0,.03);
+  border-bottom: 2px solid rgba(128,0,0,.12); /* subtle separator */
+}
+
+/* Active column gets a brand underline */
+.table-head--white thead th.sortable.asc,
+.table-head--white thead th.sortable.desc {
+  border-bottom-color: var(--lee-red);
+}
+
+/* Carets in brand color on white */
+.table-head--white thead th.sortable .sort-caret::before { border-bottom-color: var(--lee-red); opacity: 1; }
+.table-head--white thead th.sortable .sort-caret::after  { border-top-color:    var(--lee-red); opacity: 1; }
+:root {
+  --merlot: #741c2a;
+  /* if you want a merlot option */
+}
+
+/* subtle rounded header corners */
+thead th:first-child {
+  border-top-left-radius: 10px;
+}
+
+thead th:last-child {
+  border-top-right-radius: 10px;
+}
+
+/* TINTED BRAND BAR */
+.table-head--tint thead th {
+  color: #fff;
+  background:
+    linear-gradient(to bottom, rgba(255, 255, 255, .10), rgba(0, 0, 0, .06)),
+    var(--lee-red);
+  /* swap to var(--merlot) on the table for merlot */
+  box-shadow:
+    inset 0 -1px 0 rgba(255, 255, 255, .18),
+    0 1px 2px rgba(0, 0, 0, .06);
+  border-bottom: 0;
+}
+
+/* Carets stay readable on dark header */
+.table-head--tint thead th.sortable .sort-caret::before,
+.table-head--tint thead th.sortable .sort-caret::after {
+  opacity: .85;
+  border-bottom-color: rgba(255, 255, 255, .9);
+  border-top-color: rgba(255, 255, 255, .9);
+}
+
+.table-head--tint thead th.sortable.asc .sort-caret::before {
+  border-bottom-color: #fff;
+}
+
+.table-head--tint thead th.sortable.desc .sort-caret::after {
+  border-top-color: #fff;
+}
+/* STICKY (optional, works with any theme) */
+.table-sticky thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+/* GLASS */
+.table-head--glass thead th {
+  backdrop-filter: saturate(160%) blur(8px);
+  -webkit-backdrop-filter: saturate(160%) blur(8px);
+  background:
+    linear-gradient(to bottom, rgba(255, 255, 255, .65), rgba(255, 255, 255, .50)),
+    linear-gradient(to bottom, rgba(255, 255, 255, .06), rgba(0, 0, 0, .06)),
+    var(--lee-red);
+  /* tint under the glass */
+  color: #2b2b2b;
+  border-bottom: 1px solid rgba(0, 0, 0, .06);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .06);
+}
+
+/* Make active carets pop */
+.table-head--glass thead th.sortable .sort-caret::before,
+.table-head--glass thead th.sortable .sort-caret::after {
+  border-bottom-color: var(--lee-red);
+  border-top-color: var(--lee-red);
+  opacity: .9;
+}
