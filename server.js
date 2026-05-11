@@ -24,6 +24,50 @@ const PAGE_LIMIT = 200;
 const DATA_DIR = fs.existsSync('/data') ? '/data' : path.join(__dirname, 'data');
 const CACHE_FILE = path.join(DATA_DIR, 'listings.json');
 
+
+// Keep county on each property/listing payload for front-end search only.
+// The report UI does not render this field, but the front end includes it in a hidden search index.
+function countyValueToText(value) {
+  if (value == null) return '';
+  if (typeof value === 'object') {
+    return String(value.name ?? value.label ?? value.value ?? value.title ?? '').trim();
+  }
+  return String(value).trim();
+}
+
+function getCountyNameFromProperty(property) {
+  const candidates = [
+    property?.county,
+    property?.county_name,
+    property?.countyName,
+    property?.property_county,
+    property?.propertyCounty,
+    property?.address_county,
+    property?.property?.county,
+    property?.property?.county_name,
+    property?.property?.countyName,
+    property?.location?.county,
+    property?.address?.county,
+  ];
+
+  for (const candidate of candidates) {
+    const county = countyValueToText(candidate);
+    if (county) return county;
+  }
+  return '';
+}
+
+function normalizePropertyForSearch(property) {
+  if (!property || typeof property !== 'object') return property;
+  const county = getCountyNameFromProperty(property);
+  if (!county) return property;
+  return { ...property, county };
+}
+
+function normalizePropertiesForSearch(properties) {
+  return Array.isArray(properties) ? properties.map(normalizePropertyForSearch) : [];
+}
+
 function ensureDataDir() {
   try { if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true }); }
   catch (e) { console.error('❌ ensureDataDir:', e.message); }
@@ -38,7 +82,11 @@ function readCacheFromDisk() {
     try {
       if (!fs.existsSync(p)) continue;
       const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
-      if (Array.isArray(parsed.properties) && parsed.properties.length) return parsed;
+      if (Array.isArray(parsed.properties) && parsed.properties.length) {
+        parsed.properties = normalizePropertiesForSearch(parsed.properties);
+        parsed.count = parsed.properties.length;
+        return parsed;
+      }
     } catch (_) {}
   }
   return { properties: [], last_updated: null, count: 0 };
@@ -96,7 +144,7 @@ async function fetchAllListings() {
     if (properties.length < PAGE_LIMIT) break;
     offset += PAGE_LIMIT;
   }
-  return all;
+  return normalizePropertiesForSearch(all);
 }
 
 // --- Load/refresh logic with fallback ---
@@ -166,10 +214,11 @@ app.use((req, _res, next) => {
 });
 
 app.get('/api/listings', (_req, res) => {
+  const properties = normalizePropertiesForSearch(listingsCache);
   res.json({
-    properties: listingsCache,
+    properties,
     last_updated: listingsLastUpdated,
-    count: listingsCache.length
+    count: properties.length
   });
 });
 

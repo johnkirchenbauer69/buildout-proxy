@@ -164,6 +164,85 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const toNum = v =>
   typeof v === 'number' ? v : Number(String(v ?? '').replace(/[^\d.-]/g, '')) || 0;
 const toText = (s) => (s ?? '').toString().replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+// County is intentionally kept hidden: it is stored on each listing and indexed for search,
+// but it is never rendered in the table or expanded details UI.
+function countyValueToText(value) {
+  if (value == null) return '';
+  if (typeof value === 'object') {
+    return String(value.name ?? value.label ?? value.value ?? value.title ?? '').trim();
+  }
+  return String(value).trim();
+}
+
+function getCountyName(listing) {
+  const candidates = [
+    listing?.county,
+    listing?.county_name,
+    listing?.countyName,
+    listing?.property_county,
+    listing?.propertyCounty,
+    listing?.address_county,
+    listing?.property?.county,
+    listing?.property?.county_name,
+    listing?.property?.countyName,
+    listing?.location?.county,
+    listing?.address?.county,
+  ];
+
+  for (const candidate of candidates) {
+    const county = countyValueToText(candidate);
+    if (county) return county;
+  }
+  return '';
+}
+
+function normalizeSearchText(value) {
+  return (value ?? '')
+    .toString()
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function countySearchAliases(county) {
+  const raw = countyValueToText(county);
+  if (!raw) return '';
+
+  const withoutSuffix = raw.replace(/\s+county$/i, '').trim();
+  const camelSpaced = withoutSuffix.replace(/([a-z])([A-Z])/g, '$1 $2');
+  const compact = withoutSuffix.replace(/[^a-z0-9]/gi, '');
+  const aliases = [raw, withoutSuffix, compact, camelSpaced];
+  if (withoutSuffix) aliases.push(`${withoutSuffix} County`);
+  if (camelSpaced && camelSpaced !== withoutSuffix) aliases.push(`${camelSpaced} County`);
+  if (compact) aliases.push(`${compact}County`);
+
+  return [...new Set(aliases.filter(Boolean))].join(' ');
+}
+
+function buildListingSearchIndex(listing) {
+  const county = getCountyName(listing);
+  const brokerText = Array.isArray(listing?.brokersArr)
+    ? listing.brokersArr.map(b => `${b.name || ''} ${b.email || ''}`).join(' ')
+    : listing?.brokerDisplay;
+
+  return [
+    listing?.address,
+    listing?.city,
+    listing?.state,
+    listing?.zip,
+    brokerText,
+    listing?.lease_listing_web_title,
+    listing?.sale_listing_web_title,
+    countySearchAliases(county),
+  ]
+    .map(normalizeSearchText)
+    .filter(Boolean)
+    .join(' ');
+}
+
 // robust getter for space square footage across orgs/fields
 function getSpaceSize(space) {
   const candidates = [
@@ -371,8 +450,8 @@ async function fetchWithTimeout(url, ms = 12000) {
 
 // ---- Data fetch
 async function fetchAllListings() {
-  const cacheKey = 'buildout:listings:v1';
-  const cached = sessionStorage.getItem(cacheKey);
+  const cacheKey = 'buildout:listings:v2'; // v2 includes hidden county search data
+  const cached = !FORCE_REFRESH && sessionStorage.getItem(cacheKey);
   if (cached) {
     try {
       const parsed = JSON.parse(cached);
@@ -529,13 +608,17 @@ async function loadListings() {
         hadSpaces: spaces.length > 0,
       };
 
-      return {
+      const county = getCountyName(listing);
+      const enrichedListing = {
         ...listing,
+        county,
         brokerDisplay,
         brokersArr,
         totalAvailableSF,
         sizeDebug,
       };
+      enrichedListing.searchIndex = buildListingSearchIndex(enrichedListing);
+      return enrichedListing;
     });
 
     // When debugging, expose the raw structures and diagnostics on window
@@ -545,7 +628,6 @@ async function loadListings() {
       window.__allLeaseSpaces = leaseSpaces;
       maybeLogSizeDiagnostics(listingsGlobal, spacesByProperty);
     }
-
 
     // First paint:
     // If you want initial sort/filter to apply, call filterAndSort();
@@ -741,15 +823,11 @@ function renderTable(listingsArr) {
 function updateSortIndicators() {
   document.querySelectorAll('th.sortable').forEach(th => {
     th.classList.remove("asc", "desc");
-    th.setAttribute("aria-sort", "none"); // add this
     if (currentSort.key && th.getAttribute("data-sort") === currentSort.key) {
-      const isAsc = currentSort.dir === 1;
-      th.classList.add(isAsc ? "asc" : "desc");
-      th.setAttribute("aria-sort", isAsc ? "ascending" : "descending"); // and this
+      th.classList.add(currentSort.dir === 1 ? "asc" : "desc");
     }
   });
 }
-
 
 function maybeLogSizeDiagnostics(listings, spacesByProperty) {
   if (!DEBUG) return;
@@ -788,15 +866,8 @@ function maybeLogSizeDiagnostics(listings, spacesByProperty) {
   }
 }
 
-// Use whatever the table is displaying for Size.
-// Extract the number; also report if it's AC to break ties nicely.
-function sizeDisplaySortKey(listing) {
-  const s = getTableSize(listing) || '';    // e.g., "114,785 SF", "131.70 AC", "—"
-  return { n: toNum(s), isAC: /ac\b/i.test(s) };
-}
-
 function filterAndSort() {
-  const q = (document.getElementById("searchInput")?.value || "").toLowerCase();
+  const q = normalizeSearchText(document.getElementById("searchInput")?.value || "");
   let arr = listingsGlobal;
 
   // Filter by property type
@@ -804,29 +875,24 @@ function filterAndSort() {
     arr = arr.filter(l => String(l.property_type_id) === currentTypeFilter);
   }
   if (currentListingType) {
-    arr = arr.filter(l => {
-      const lease = !!l.lease;
-      const sale  = !!l.sale;
+  arr = arr.filter(l => {
+    const lease = !!l.lease;
+    const sale  = !!l.sale;
 
-      // exact-match behavior:
-      if (currentListingType === 'lease') return lease && !sale;
-      if (currentListingType === 'sale')  return sale  && !lease;
-      if (currentListingType === 'both')  return lease && sale;
-      return true;
-    });
-  }
+    // exact-match behavior:
+    if (currentListingType === 'lease') return lease && !sale;
+    if (currentListingType === 'sale')  return sale  && !lease;
+    if (currentListingType === 'both')  return lease && sale;
+    return true;
+  });
+}
 
-  // Search filter
+  // Search filter. County is searched from the hidden searchIndex only.
   if (q) {
-    arr = arr.filter(l =>
-      (l.address || "").toLowerCase().includes(q) ||
-      (l.city || "").toLowerCase().includes(q) ||
-      (l.state || "").toLowerCase().includes(q) ||
-      (l.zip || "").toLowerCase().includes(q) ||
-      (l.brokerDisplay || "").toLowerCase().includes(q) ||
-      (l.lease_listing_web_title || "").toLowerCase().includes(q) ||
-      (l.sale_listing_web_title || "").toLowerCase().includes(q)
-    );
+    arr = arr.filter(l => {
+      const index = l.searchIndex || buildListingSearchIndex(l);
+      return index.includes(q);
+    });
   }
 
   // Sort
@@ -838,44 +904,27 @@ function filterAndSort() {
           v1 = `${a.address || ""} ${a.city || ""} ${a.state || ""} ${a.zip || ""}`.toLowerCase();
           v2 = `${b.address || ""} ${b.city || ""} ${b.state || ""} ${b.zip || ""}`.toLowerCase();
           break;
-
-        case "size": {
-          const ak = sizeDisplaySortKey(a);
-          const bk = sizeDisplaySortKey(b);
-
-          if (ak.n < bk.n) return -1 * currentSort.dir;
-          if (ak.n > bk.n) return  1 * currentSort.dir;
-
-          // Tie-breaker: when numbers are equal, prefer SF over AC on DESC,
-          // and AC over SF on ASC (keeps behavior intuitive).
-          if (ak.isAC !== bk.isAC) {
-            return (currentSort.dir === -1)
-              ? (ak.isAC ? 1 : -1)   // DESC: SF before AC
-              : (ak.isAC ? -1 : 1);  // ASC: AC before SF
-          }
-          return 0;
-        }
-
+        case "size":
+          v1 = (a.totalAvailableSF ?? a.building_size_sf ?? 0);
+          v2 = (b.totalAvailableSF ?? b.building_size_sf ?? 0);
+          break;
         case "brokers":
           v1 = (a.brokerDisplay || "").toLowerCase();
           v2 = (b.brokerDisplay || "").toLowerCase();
           break;
-
         case "type":
           v1 = (a.lease && a.sale) ? "for sale & lease" : a.lease ? "for lease" : "for sale";
           v2 = (b.lease && b.sale) ? "for sale & lease" : b.lease ? "for lease" : "for sale";
           break;
-
         case "city":
           v1 = (a.city || "").toLowerCase();
           v2 = (b.city || "").toLowerCase();
           break;
-
         default:
           v1 = v2 = "";
       }
       if (v1 < v2) return -1 * currentSort.dir;
-      if (v1 > v2) return  1 * currentSort.dir;
+      if (v1 > v2) return 1 * currentSort.dir;
       return 0;
     });
   }
